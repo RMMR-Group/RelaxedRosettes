@@ -1,3 +1,5 @@
+module RelaxedRosettes
+
 using LinearAlgebra
 using Random
 using Distributions
@@ -169,4 +171,6 @@ function runTest()
 
 	f
 	
+end
+
 end
