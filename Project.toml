@@ -1,0 +1,16 @@
+name = "RelaxedRosettes"
+uuid = "38403ba8-09a6-4dab-82d3-03f2c0713e47"
+authors = ["Dylan Tisdall <mtisdall@pennmedicine.upenn.edu>", "Andrew Van <vanandrew@wustl.edu>"]
+version = "0.1.0"
+
+[deps]
+Convex = "f65535da-76fb-5f13-bab9-19810c17039a"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+ECOS = "e2685f51-7e38-5353-a97d-a921fd2c8199"
+FFTW = "7a1cc6ca-52ef-59f5-83cd-3a7055c09341"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NFFT = "efe261a4-0d2b-5849-be55-fc731d526b0d"
+PaddedViews = "5432bcbf-9aad-5242-b902-cca2824c8663"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
