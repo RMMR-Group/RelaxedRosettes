@@ -91,10 +91,10 @@ function generateTrajectory(numPoints, raster_between_targets)
 	problem = minimize(norm(vec(g * slewMat')), [target_cons])
 	solve!(problem, ECOS.Optimizer)
 
-	return (evaluate(g), target_points, rasters_between_points);
+	return (evaluate(g), target_points, rasters_between_points)
 end
 
-function runTest()
+function generateRosette(; display_plots = true)
 
 	k_fov = 1.0/(0.8u"mm")
 	gradient_raster = 10.0u"µs"
@@ -102,75 +102,96 @@ function runTest()
 	gradient_unit = uconvert(u"mT/m", k_fov / (larmor_frequency * gradient_raster))
 	slew_unit = uconvert(u"T/m/s", gradient_unit / gradient_raster)
 
+	# generate trajectory
 	(gOpt, target_points, rasters_between_points) = generateTrajectory(30, 75)
-
 	print(uconvert.(u"ms", cumsum(rasters_between_points) .* gradient_raster)[1:2:end])
 
-	f = Figure()
-	ax1 = Axis3(f[1,1], aspect=(1,1,1))
-	scatter!(ax1, target_points[:, 3:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[3:4:end]);
-	scatter!(ax1, target_points[:, 4:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[4:4:end]);
-	scatter!(ax1, target_points[:, 2:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[2:4:end]);
-	lines!(ax1, cumsum(gOpt,dims=2) .* ustrip(k_fov), colormap = :batlow, color = 1:size(gOpt)[2]);
-	mesh!(ax1, Sphere(Point3f(0),1 .* ustrip(k_fov)), color = (:dodgerblue, 0.05))
+	# generate spoiler gradient
+	spoiler_last_point = target_points[:, end] + 4 .* gOpt[:, end] ./ norm(gOpt[:, end])
+	spoiler_displacement = spoiler_last_point - target_points[:, end]
+	num_spoiler_points = round(Int64, (spoiler_displacement ./ gOpt[:, end])[1])
+	spoiler_points = repeat(gOpt[:, end], 1, num_spoiler_points)
 
-	ax2 = Axis3(f[1,2], aspect=(1,1,1))
-	lines!(ax2, gOpt .* ustrip(gradient_unit), colormap = :batlow, color = 1:size(gOpt)[2]);
+	# generate ramp down gradient
+	# compute the gradient to go to zero after spoiler
+	# just hard code to do in 100 T/m/s
+	num_points_to_zero = maximum(abs.(ceil.(Int64, 100 ./ (reshape([0.0, 0.0, 0.0], (3,1)) - gOpt[:, end] .* ustrip(gradient_unit)))))
+	grad_slope = (reshape([0.0, 0.0, 0.0], (3,1)) - gOpt[:, end]) ./ num_points_to_zero
+	zero_grad_points = broadcast(+, grad_slope .* reshape(collect(1:num_points_to_zero), (1, num_points_to_zero)), reshape(gOpt[:, end], (3, 1)))
+	zero_grad_points[:, end] = [0.0, 0.0, 0.0]
 
-	pMat = hcat(map(i -> PaddedView(0,
-			[ones(i)' 0.5]',
-			(sum(rasters_between_points) + 1,),
-			(1,)), [0 cumsum(rasters_between_points)']')...)
+	# concatenate the gradients
+	gOpt_with_spoiler = hcat(gOpt, spoiler_points, zero_grad_points)
 
-	slewMat = Tridiagonal(zeros(size(pMat)[1]-1), -ones(size(pMat)[1]), ones(size(pMat)[1]-1))[1:end-1,:]
+	if display_plots
+		f = Figure()
+		ax1 = Axis3(f[1,1], aspect=(1,1,1))
+		scatter!(ax1, target_points[:, 3:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[3:4:end]);
+		scatter!(ax1, target_points[:, 4:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[4:4:end]);
+		scatter!(ax1, target_points[:, 2:4:end] .* ustrip(k_fov), colormap = :batlow, color = cumsum(rasters_between_points)[2:4:end]);
+		lines!(ax1, cumsum(gOpt,dims=2) .* ustrip(k_fov), colormap = :batlow, color = 1:size(gOpt)[2]);
+		mesh!(ax1, Sphere(Point3f(0),1 .* ustrip(k_fov)), color = (:dodgerblue, 0.05))
 
-	ax3 = Axis3(f[1,3], aspect=(1,1,1))
-	lines!(ax3, gOpt * slewMat' * ustrip(slew_unit), colormap = :batlow, color = 1:size(gOpt)[2]);
+		ax2 = Axis3(f[1,2], aspect=(1,1,1))
+		lines!(ax2, gOpt .* ustrip(gradient_unit), colormap = :batlow, color = 1:size(gOpt)[2]);
 
-	gOptFreq = fftshift(fft(gOpt .* ustrip(gradient_unit), (2)), (2))
-	ax4 = Axis(f[2,1])
-	freqLims = ustrip(uconvert(u"Hz", 1.0/gradient_raster))/2.0
-	freqBins = range(-freqLims, freqLims, length=size(gOptFreq)[2])
-	lines!(ax4, freqBins, abs.(gOptFreq)[1,:])
-	lines!(ax4, freqBins, abs.(gOptFreq)[2,:])
-	lines!(ax4, freqBins, abs.(gOptFreq)[3,:])
+		pMat = hcat(map(i -> PaddedView(0,
+				[ones(i)' 0.5]',
+				(sum(rasters_between_points) + 1,),
+				(1,)), [0 cumsum(rasters_between_points)']')...)
 
+		slewMat = Tridiagonal(zeros(size(pMat)[1]-1), -ones(size(pMat)[1]), ones(size(pMat)[1]-1))[1:end-1,:]
 
-	ax5 = Axis(f[2,2])
-	test = mapslices(norm, gOptFreq, dims=1)
-	lines!(ax5, freqBins, test[1,:])
+		ax3 = Axis3(f[1,3], aspect=(1,1,1))
+		lines!(ax3, gOpt * slewMat' * ustrip(slew_unit), colormap = :batlow, color = 1:size(gOpt)[2]);
 
-	sampleKPoints = (cumsum(gOpt, dims=2) - gOpt ./ 2.0) ./ 2.0
-	sampleTPoints = (2.0 * (cumsum(ones(size(gOpt)[2]), dims=2) .- 0.5) ./ size(gOpt)[2] .- 1.0) ./ 2.0
-	print(size(sampleKPoints))
-	print(size(sampleTPoints))
-	sampleKTPoints = [sampleKPoints' sampleTPoints]'
+		gOptFreq = fftshift(fft(gOpt .* ustrip(gradient_unit), (2)), (2))
+		ax4 = Axis(f[2,1])
+		freqLims = ustrip(uconvert(u"Hz", 1.0/gradient_raster))/2.0
+		freqBins = range(-freqLims, freqLims, length=size(gOptFreq)[2])
+		lines!(ax4, freqBins, abs.(gOptFreq)[1,:])
+		lines!(ax4, freqBins, abs.(gOptFreq)[2,:])
+		lines!(ax4, freqBins, abs.(gOptFreq)[3,:])
 
-	for i = 1:10
-		(gOptTemp, target_points2, rasters_between_points2) = generateTrajectory(30, 75)
-		newKPoints = (cumsum(gOptTemp, dims=2) - gOptTemp ./ 2.0) ./ 2.0
-		sampleKPoints = [sampleKPoints newKPoints]
-		newTPoints = (2.0 * (cumsum(ones(size(gOptTemp)[2]), dims=2) .- 0.5) ./ size(gOptTemp)[2] .- 1.0) ./ 2.0
-		sampleKTPoints = [sampleKTPoints [newKPoints' newTPoints]' ]
+		ax5 = Axis(f[2,2])
+		test = mapslices(norm, gOptFreq, dims=1)
+		lines!(ax5, freqBins, test[1,:])
+
+		# plot the gradient in each direction individually
+		ax6 = Axis(f[4,1])
+		lines!(ax6, gOpt_with_spoiler[1,:], colormap = :batlow, color = 1:size(gOpt)[2])
+		ax7 = Axis(f[4,2])
+		lines!(ax7, gOpt_with_spoiler[2,:], colormap = :batlow, color = 1:size(gOpt)[2])
+		ax8 = Axis(f[4,3])
+		lines!(ax8, gOpt_with_spoiler[3,:], colormap = :batlow, color = 1:size(gOpt)[2]) 
+
+		sampleKPoints = (cumsum(gOpt, dims=2) - gOpt ./ 2.0) ./ 2.0
+		sampleTPoints = (2.0 * (cumsum(ones(size(gOpt)[2]), dims=2) .- 0.5) ./ size(gOpt)[2] .- 1.0) ./ 2.0
+		print(size(sampleKPoints))
+		print(size(sampleTPoints))
+		sampleKTPoints = [sampleKPoints' sampleTPoints]'
+		for i = 1:10
+			(gOptTemp, target_points2, rasters_between_points2) = generateTrajectory(30, 75)
+			newKPoints = (cumsum(gOptTemp, dims=2) - gOptTemp ./ 2.0) ./ 2.0
+			sampleKPoints = [sampleKPoints newKPoints]
+			newTPoints = (2.0 * (cumsum(ones(size(gOptTemp)[2]), dims=2) .- 0.5) ./ size(gOptTemp)[2] .- 1.0) ./ 2.0
+			sampleKTPoints = [sampleKTPoints [newKPoints' newTPoints]' ]
+		end
+		print(size(sampleKPoints))
+		testData = ones(ComplexF32, size(sampleKPoints)[2])
+		p3D = plan_nfft(sampleKPoints, (256, 256, 256))
+		output3D = adjoint(p3D) * testData
+		image(f[3,1], abs.(output3D[129,:,:]))
+		# p4D = plan_nfft(sampleKTPoints, (10, 10, 10, 2000))
+		# output4D = adjoint(p4D) * testData
+		# image(f[3,2], abs.(output4D[17,17,:,:]))
+		# image(f[3,3], abs.(output4D[17,:,:,1001]))
+
+		# display plots
+		display(f)
 	end
 
-	print(size(sampleKPoints))
-
-	testData = ones(ComplexF32, size(sampleKPoints)[2] )
-
-	p3D = plan_nfft(sampleKPoints, (256, 256, 256))
-	output3D = adjoint(p3D) * testData
-
-	image(f[3,1], abs.(output3D[129,:,:]))
-
-	#p4D = plan_nfft(sampleKTPoints, (10, 10, 10, 2000))
-	#output4D = adjoint(p4D) * testData
-
-	#image(f[3,2], abs.(output4D[17,17,:,:]))
-	#image(f[3,3], abs.(output4D[17,:,:,1001]))
-
-	f
-	
+	return (gOpt_with_spoiler, gOpt, target_points, rasters_between_points, gradient_raster, gradient_unit)
 end
 
 end
