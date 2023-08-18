@@ -3,6 +3,7 @@ import numpy as np
 import nibabel as nib
 from twixtools import read_twix, map_twix
 import matplotlib.pyplot as plt
+import simplebrainviewer as sbv
 from pynufft import NUFFT
 
 
@@ -63,24 +64,34 @@ if __name__ == "__main__":
     # get where the kspace trajectory is zero
     zero_idx = np.where(np.all(kspace_trajectory == 0, axis=1))[0]
 
-    # plot subsampled kspace trajectory
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    ax.plot(kspace_trajectory[:, 0], kspace_trajectory[:, 1], kspace_trajectory[:, 2])
-    plt.show()
+    # # plot subsampled kspace trajectory
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection="3d")
+    # ax.plot(kspace_trajectory[:, 0], kspace_trajectory[:, 1], kspace_trajectory[:, 2])
+    # plt.show()
 
     # Create NuFFT object
     nufft_obj = NUFFT()
     Nd = 128
     Kd = 256
-    Jd = 8
+    Jd = 6
     nufft_obj.plan(kspace_trajectory, (Nd, Nd, Nd), (Kd, Kd, Kd), (Jd, Jd, Jd))
-    recon_list = []
-    recon_list2 = []
-    for i in range(img_data.shape[1]):
-        print(f"Reconstructing {i}")
-        recon_list.append(nufft_obj.adjoint(img_data[:, i, 0]))
-    recon = np.stack(recon_list, axis=-1)
-    mean_recon = np.sqrt(np.sum(recon ** 2, axis=-1))
-    mag_recon = np.abs(mean_recon)
+    # recon_list = []
+    # for i in range(img_data.shape[1]):
+    #     print(f"Reconstructing {i}")
+    #     recon_list.append(nufft_obj.solve(img_data[:, i, 0], solver='cg', maxiter=50))
+    # recon = np.stack(recon_list, axis=-1)
+    # crecon = np.sqrt(np.sum(recon ** 2, axis=-1))
+    crecon = nufft_obj.solve(img_data[:, 8, 0], solver='dc', maxiter=100)
+    mag_recon = np.abs(crecon)
     nib.Nifti1Image(mag_recon, np.eye(4)).to_filename(data_path / "recon.nii.gz")
+    # compute forward model
+    kspace = nufft_obj.forward(crecon)
+    f = plt.figure()
+    ax1 = f.add_subplot(211)
+    plt.plot(np.abs(kspace))
+    plt.plot(np.abs(img_data[:, 8, 0]))
+    ax2 = f.add_subplot(212)
+    plt.plot(np.angle(kspace))
+    plt.plot(np.angle(img_data[:, 8, 0]))
+    sbv.plot_brain(mag_recon)
